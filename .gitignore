@@ -1,0 +1,51 @@
+# Binaries
+forge
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.html
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test data (keep structure, ignore temp)
+testdata/temp/
+testdata/*.db
+testdata/*.db-shm
+testdata/*.db-wal
+
+# Forge runtime data
+.forge/
+*.forge/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Build artifacts
+dist/
+build/
+bin/
