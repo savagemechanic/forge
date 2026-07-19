@@ -24,13 +24,13 @@ const (
 type MemoryKind string
 
 const (
-	MemoryKindFact       MemoryKind = "fact"
+	MemoryKindFact        MemoryKind = "fact"
 	MemoryKindInstruction MemoryKind = "instruction"
-	MemoryKindPreference MemoryKind = "preference"
-	MemoryKindDecision   MemoryKind = "decision"
-	MemoryKindWorkflow   MemoryKind = "workflow"
-	MemoryKindSummary    MemoryKind = "summary"
-	MemoryKindWarning    MemoryKind = "warning"
+	MemoryKindPreference  MemoryKind = "preference"
+	MemoryKindDecision    MemoryKind = "decision"
+	MemoryKindWorkflow    MemoryKind = "workflow"
+	MemoryKindSummary     MemoryKind = "summary"
+	MemoryKindWarning     MemoryKind = "warning"
 )
 
 type MemorySource string
@@ -59,80 +59,95 @@ type EvidenceRef struct {
 }
 
 type MemoryEntry struct {
-	ID            string
-	Scope         MemoryScope
-	Kind          MemoryKind
-	Content       string
-	Source        MemorySource
-	Confidence    float64
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	Evidence      []EvidenceRef
-	Status        MemoryStatus
-	SemanticHash  string
-	FolderID      string // For folder-scoped entries
-	ApprovedAt    *time.Time
-	ApprovedBy    string
+	ID           string
+	Scope        MemoryScope
+	Kind         MemoryKind
+	Content      string
+	Source       MemorySource
+	Confidence   float64
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	Evidence     []EvidenceRef
+	Status       MemoryStatus
+	SemanticHash string
+	FolderID     string
+	ApprovedAt   *time.Time
+	ApprovedBy   string
 }
 
 // ============================================================================
-// STUB IMPLEMENTATIONS (RED PHASE - ALL WILL FAIL)
+// STUB IMPLEMENTATIONS - NOW IMPLEMENTED (GREEN PHASE)
 // ============================================================================
 
 // GetStorageLocation returns where this entry should be stored based on scope
-// STUB: Always returns error to fail tests
 func (e *MemoryEntry) GetStorageLocation() (string, error) {
-	// TODO: Implement scope-based storage location
-	// - session: "in-memory"
-	// - folder: ".forge/memory/<folder-id>.db"
-	// - global: "~/.forge/global.db"
-	// For now, return error
-	return "", &InvalidScopeError{Scope: e.Scope}
+	switch e.Scope {
+	case MemoryScopeSession:
+		return "in-memory", nil
+	case MemoryScopeFolder:
+		if e.FolderID == "" {
+			return "", &InvalidScopeError{Scope: e.Scope}
+		}
+		return filepath.Join(".forge", "memory", e.FolderID+".db"), nil
+	case MemoryScopeGlobal:
+		return GetForgeGlobalPath(), nil
+	default:
+		return "", &InvalidScopeError{Scope: e.Scope}
+	}
 }
 
 // SetInitialStatus sets status based on source
-// STUB: Does nothing to fail tests
 func (e *MemoryEntry) SetInitialStatus() {
-	// TODO: Implement initial status setting
-	// - user-explicit, repo-derived, tool-observed, skill-derived → active
-	// - model-inferred → pending
-	// For now, do nothing
+	switch e.Source {
+	case MemorySourceUserExplicit, MemorySourceRepoDerived, MemorySourceToolObserved, MemorySourceSkillDerived:
+		e.Status = MemoryStatusActive
+	case MemorySourceModelInferred:
+		e.Status = MemoryStatusPending
+	}
 }
 
 // ValidateStatusBySource checks status is appropriate for source
-// STUB: Always returns false to fail tests
 func (e *MemoryEntry) ValidateStatusBySource() bool {
-	// TODO: Implement status validation
-	// - model-inferred can only be active if approved
-	// - For now, always fail
-	return false
+	// model-inferred can only be active if approved
+	if e.Source == MemorySourceModelInferred && e.Status == MemoryStatusActive {
+		if e.ApprovedAt == nil || e.ApprovedBy == "" {
+			return false
+		}
+	}
+	return true
 }
 
 // ValidateConfidenceNotIncreased checks confidence hasn't increased
-// STUB: Always returns false to fail tests
 func (e *MemoryEntry) ValidateConfidenceNotIncreased(previous float64) bool {
-	// TODO: Implement confidence validation
-	// - New confidence must be <= previous confidence
-	// - For now, always fail
-	return false
+	return e.Confidence <= previous
 }
 
 // ValidateConfidenceRange checks confidence is in [0, 1]
-// STUB: Always returns false to fail tests
 func (e *MemoryEntry) ValidateConfidenceRange() bool {
-	// TODO: Implement range validation
-	// - Confidence must be >= 0 and <= 1
-	// - For now, always fail
-	return false
+	return e.Confidence >= 0 && e.Confidence <= 1
 }
 
 // ApplyTimeDecay applies time-based confidence decay
-// STUB: Returns 0 to fail tests
 func (e *MemoryEntry) ApplyTimeDecay(now time.Time) float64 {
-	// TODO: Implement time decay function
-	// - Decay based on age and source
-	// - For now, return 0
-	return 0
+	age := now.Sub(e.UpdatedAt)
+	ageHours := age.Hours()
+
+	// Decay based on source
+	var decayFactor float64
+	switch e.Source {
+	case MemorySourceUserExplicit:
+		decayFactor = 0.0001 // Very slow decay
+	case MemorySourceRepoDerived, MemorySourceToolObserved, MemorySourceSkillDerived:
+		decayFactor = 0.001 // Slow decay
+	case MemorySourceModelInferred:
+		decayFactor = 0.01  // Faster decay
+	default:
+		decayFactor = 0.001
+	}
+
+	// Exponential decay: new = old * e^(-rate * time)
+	decayed := e.Confidence * exp(-decayFactor*ageHours)
+	return decayed
 }
 
 // ============================================================================
@@ -140,13 +155,23 @@ func (e *MemoryEntry) ApplyTimeDecay(now time.Time) float64 {
 // ============================================================================
 
 // ValidateNoDuplicateActiveEntries checks no two active entries share Scope+Kind+SemanticHash
-// STUB: Always returns false to fail tests
 func ValidateNoDuplicateActiveEntries(store MemoryEntryStore) (bool, error) {
-	// TODO: Implement duplicate detection
-	// - Group active entries by (Scope, Kind, SemanticHash)
-	// - No group should have >1 entry
-	// - For now, always fail
-	return false, nil
+	entries, err := store.ListActive()
+	if err != nil {
+		return false, err
+	}
+
+	// Group by (Scope, Kind, SemanticHash)
+	seen := make(map[string]bool)
+	for _, entry := range entries {
+		key := string(entry.Scope) + ":" + string(entry.Kind) + ":" + entry.SemanticHash
+		if seen[key] {
+			return false, nil
+		}
+		seen[key] = true
+	}
+
+	return true, nil
 }
 
 // ============================================================================
@@ -185,13 +210,23 @@ func (s *InMemoryMemoryEntryStore) Get(id string) (*MemoryEntry, error) {
 }
 
 func (s *InMemoryMemoryEntryStore) ListByScopeAndKind(scope MemoryScope, kind MemoryKind) ([]*MemoryEntry, error) {
-	// STUB: Always return error
-	return nil, &NotImplementedError{}
+	var result []*MemoryEntry
+	for _, entry := range s.entries {
+		if entry.Scope == scope && entry.Kind == kind {
+			result = append(result, entry)
+		}
+	}
+	return result, nil
 }
 
 func (s *InMemoryMemoryEntryStore) ListActive() ([]*MemoryEntry, error) {
-	// STUB: Always return error
-	return nil, &NotImplementedError{}
+	var result []*MemoryEntry
+	for _, entry := range s.entries {
+		if entry.Status == MemoryStatusActive {
+			result = append(result, entry)
+		}
+	}
+	return result, nil
 }
 
 // ============================================================================
@@ -212,12 +247,6 @@ type EntryNotFoundError struct {
 
 func (e *EntryNotFoundError) Error() string {
 	return "memory entry not found: " + e.ID
-}
-
-type NotImplementedError struct{}
-
-func (e *NotImplementedError) Error() string {
-	return "not implemented"
 }
 
 // ============================================================================
@@ -248,4 +277,17 @@ func GetForgeGlobalPath() string {
 // timePtr returns a pointer to time.Time
 func timePtr(t time.Time) *time.Time {
 	return &t
+}
+
+// exp is a simple exponential function (we don't import math to keep it simple)
+func exp(x float64) float64 {
+	// Simple Taylor series approximation for e^x
+	// e^x = 1 + x + x^2/2! + x^3/3! + ...
+	result := 1.0
+	term := 1.0
+	for i := 1; i <= 20; i++ {
+		term = term * x / float64(i)
+		result += term
+	}
+	return result
 }

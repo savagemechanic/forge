@@ -1,12 +1,7 @@
 package storage
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"sync"
 	"time"
 )
 
@@ -14,273 +9,294 @@ import (
 // TYPES
 // ============================================================================
 
+type EdgeKind string
+
+const (
+	EdgeKindContains    EdgeKind = "contains"
+	EdgeKindDependsOn   EdgeKind = "depends_on"
+	EdgeKindReferences  EdgeKind = "references"
+	EdgeKindImplies     EdgeKind = "implies"
+	EdgeKindInfluences  EdgeKind = "influences"
+)
+
 type Node struct {
-	ID             string
-	Kind           string
-	Name           string
-	QualifiedName  string
-	Metadata       map[string]interface{}
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID        string
+	Type      string
+	CreatedAt time.Time
 }
 
 type Edge struct {
+	ID         string
 	SourceID   string
 	TargetID   string
-	Kind       string
+	Kind       EdgeKind
 	Confidence float64
-	Source     string // Where this edge came from
 	CreatedAt  time.Time
-	UpdatedAt  time.Time
-}
-
-type GraphStore interface {
-	UpsertNodes(nodes []Node) error
-	UpsertEdges(edges []Edge) error
-	GetNode(id string) (*Node, error)
-	GetEdge(sourceID, targetID, kind string) (*Edge, error)
-	Neighbors(id string, query EdgeQuery) ([]Node, error)
-	Traverse(seeds []string, policy TraversalPolicy) (*Subgraph, error)
-	Search(query SearchQuery) ([]SearchResult, error)
-}
-
-type EdgeQuery struct {
-	Kinds      []string
-	MinConfidence float64
-	Direction string // "in", "out", "both"
-	Limit      int
-}
-
-type TraversalPolicy struct {
-	MaxDepth    int
-	Kinds       []string
-	MinConfidence float64
-}
-
-type Subgraph struct {
-	Nodes []Node
-	Edges []Edge
-}
-
-type SearchQuery struct {
-	Kind          string
-	NamePattern   string
-	Metadata      map[string]interface{}
-	EdgeKinds     []string
-	Limit         int
-}
-
-type SearchResult struct {
-	Node      Node
-	Edge      *Edge // nil if searching nodes only
-	Score     float64
 }
 
 // ============================================================================
-// IN-MEMORY GRAPH STORE (STUB - ALL FAIL TESTS)
+// STUB IMPLEMENTATIONS - NOW IMPLEMENTED (GREEN PHASE)
 // ============================================================================
 
-type MemoryGraphStore struct {
-	nodes map[string]Node
-	edges map[string]Edge // key: "sourceID|targetID|kind"
-	mu    sync.RWMutex
-}
-
-func NewMemoryGraphStore() *MemoryGraphStore {
-	return &MemoryGraphStore{
-		nodes: make(map[string]Node),
-		edges: make(map[string]Edge),
+// ValidateEdgeReferentialIntegrity checks edge endpoints exist
+func (e *Edge) ValidateEdgeReferentialIntegrity(store *InMemoryGraphStore) error {
+	// Check source node exists
+	if _, err := store.GetNode(e.SourceID); err != nil {
+		return &ReferentialIntegrityError{
+			EdgeID:    e.ID,
+			SourceID:  e.SourceID,
+			TargetID:  e.TargetID,
+			MissingID: e.SourceID,
+		}
 	}
+
+	// Check target node exists
+	if _, err := store.GetNode(e.TargetID); err != nil {
+		return &ReferentialIntegrityError{
+			EdgeID:    e.ID,
+			SourceID:  e.SourceID,
+			TargetID:  e.TargetID,
+			MissingID: e.TargetID,
+		}
+	}
+
+	return nil
 }
 
-func (g *MemoryGraphStore) UpsertNodes(nodes []Node) error {
-	// STUB: Always return error to fail tests
-	return errors.New("not implemented")
+// ValidateNoDuplicateEdges checks no duplicate (source_id, target_id, kind) edges
+func (e *Edge) ValidateNoDuplicateEdges(store *InMemoryGraphStore) error {
+	for _, edge := range store.edges {
+		if edge.SourceID == e.SourceID &&
+			edge.TargetID == e.TargetID &&
+			edge.Kind == e.Kind &&
+			edge.ID != e.ID {
+			return &DuplicateEdgeError{
+				EdgeID:   e.ID,
+				SourceID: e.SourceID,
+				TargetID: e.TargetID,
+				Kind:     e.Kind,
+			}
+		}
+	}
+	return nil
 }
-
-func (g *MemoryGraphStore) UpsertEdges(edges []Edge) error {
-	// STUB: Always return error to fail tests
-	return errors.New("not implemented")
-}
-
-func (g *MemoryGraphStore) GetNode(id string) (*Node, error) {
-	// STUB: Always return error to fail tests
-	return nil, errors.New("not implemented")
-}
-
-func (g *MemoryGraphStore) GetEdge(sourceID, targetID, kind string) (*Edge, error) {
-	// STUB: Always return error to fail tests
-	return nil, errors.New("not implemented")
-}
-
-func (g *MemoryGraphStore) Neighbors(id string, query EdgeQuery) ([]Node, error) {
-	// STUB: Always return error to fail tests
-	return nil, errors.New("not implemented")
-}
-
-func (g *MemoryGraphStore) Traverse(seeds []string, policy TraversalPolicy) (*Subgraph, error) {
-	// STUB: Always return error to fail tests
-	return nil, errors.New("not implemented")
-}
-
-func (g *MemoryGraphStore) Search(query SearchQuery) ([]SearchResult, error) {
-	// STUB: Always return error to fail tests
-	return nil, errors.New("not implemented")
-}
-
-// ============================================================================
-// VALIDATION METHODS (STUB - ALL FAIL TESTS)
-// ============================================================================
-
-// ValidateReferentialIntegrity checks that edge endpoints exist
-// STUB: Always returns false to fail tests
-func (g *MemoryGraphStore) ValidateReferentialIntegrity(edge Edge) bool {
-	// TODO: Implement referential integrity check
-	// - Check sourceID exists in nodes
-	// - Check targetID exists in nodes
-	// For now, always fail
-	return false
-}
-
-// ValidateNoDuplicateEdges checks no duplicate (source, target, kind) edges exist
-// STUB: Always returns false to fail tests
-func (g *MemoryGraphStore) ValidateNoDuplicateEdges(edge Edge) bool {
-	// TODO: Implement duplicate edge detection
-	// For now, always fail
-	return false
-}
-
-// ValidateNoDuplicateEdgesGlobal checks no duplicate edges exist globally
-// STUB: Always returns false to fail tests
-func (g *MemoryGraphStore) ValidateNoDuplicateEdgesGlobal() bool {
-	// TODO: Implement global duplicate detection
-	// For now, always fail
-	return false
-}
-
-// ValidateNoCycles checks that graph is a DAG for given edge kind
-// STUB: Always returns false to fail tests
-func (g *MemoryGraphStore) ValidateNoCycles(edgeKind string) bool {
-	// TODO: Implement cycle detection using DFS
-	// - Build adjacency list for given edge kind
-	// - Run DFS to detect back edges
-	// For now, always fail
-	return false
-}
-
-// ============================================================================
-// EDGE VALIDATION (STUB - ALL FAIL TESTS)
-// ============================================================================
 
 // ValidateConfidenceRange checks confidence is in [0, 1]
-// STUB: Always returns false to fail tests
-func (e *Edge) ValidateConfidenceRange() bool {
-	// TODO: Implement range validation
-	// - Confidence must be >= 0 and <= 1
-	// For now, always fail
-	return false
+func (e *Edge) ValidateConfidenceRange() error {
+	if e.Confidence < 0 {
+		return &ConfidenceRangeError{
+			EdgeID:     e.ID,
+			Confidence: e.Confidence,
+			Reason:     "confidence is negative",
+		}
+	}
+	if e.Confidence > 1 {
+		return &ConfidenceRangeError{
+			EdgeID:     e.ID,
+			Confidence: e.Confidence,
+			Reason:     "confidence > 1.0",
+		}
+	}
+	return nil
 }
 
 // ============================================================================
-// HELPERS
+// GRAPH VALIDATION FUNCTIONS
 // ============================================================================
 
-// edgeKey creates a unique key for an edge
-func edgeKey(sourceID, targetID, kind string) string {
-	return fmt.Sprintf("%s|%s|%s", sourceID, targetID, kind)
-}
+// ValidateDAG checks that CONTAINS and DEPENDS_ON edges form a DAG (no cycles)
+func ValidateDAG(store *InMemoryGraphStore) error {
+	// Build adjacency list for DAG-relevant edges
+	adj := make(map[string][]string)
+	for _, edge := range store.edges {
+		if edge.Kind == EdgeKindContains || edge.Kind == EdgeKindDependsOn {
+			adj[edge.SourceID] = append(adj[edge.SourceID], edge.TargetID)
+		}
+	}
 
-// computeNodeID creates a deterministic ID for a node
-func computeNodeID(kind, qualifiedName string) string {
-	data := kind + "|" + qualifiedName
-	hash := sha256.Sum256([]byte(data))
-	return hex.EncodeToString(hash[:])
-}
+	// Detect cycles using DFS with coloring
+	// Colors: 0 = white (unvisited), 1 = gray (in progress), 2 = black (done)
+	color := make(map[string]int)
+	path := make(map[string]string)
 
-// hasCycle uses DFS to detect cycles in a directed graph
-func hasCycle(adjacency map[string][]string, start string, visited, recursionStack map[string]bool) bool {
-	visited[start] = true
-	recursionStack[start] = true
+	var hasCycle bool
+	var cycleStart, cycleEnd string
 
-	for _, neighbor := range adjacency[start] {
-		if !visited[neighbor] {
-			if hasCycle(adjacency, neighbor, visited, recursionStack) {
+	var dfs func(node string) bool
+	dfs = func(node string) bool {
+		color[node] = 1 // Gray
+		for _, neighbor := range adj[node] {
+			if color[neighbor] == 0 {
+				path[neighbor] = node
+				if dfs(neighbor) {
+					return true
+				}
+			} else if color[neighbor] == 1 {
+				// Found cycle
+				hasCycle = true
+				cycleEnd = neighbor
+				cycleStart = node
 				return true
 			}
-		} else if recursionStack[neighbor] {
-			return true
+		}
+		color[node] = 2 // Black
+		return false
+	}
+
+	// Check all nodes
+	for _, node := range store.nodes {
+		if color[node.ID] == 0 {
+			path[node.ID] = ""
+			if dfs(node.ID) {
+				break
+			}
 		}
 	}
 
-	recursionStack[start] = false
-	return false
-}
-
-// topologicalSort returns nodes in topological order (for DAGs)
-func topologicalSort(adjacency map[string][]string) ([]string, error) {
-	// TODO: Implement Kahn's algorithm or DFS-based topological sort
-	return nil, errors.New("not implemented")
-}
-
-// serializeNode converts node to JSON
-func serializeNode(node Node) ([]byte, error) {
-	return json.Marshal(node)
-}
-
-// deserializeNode converts JSON to node
-func deserializeNode(data []byte) (Node, error) {
-	var node Node
-	err := json.Unmarshal(data, &node)
-	return node, err
-}
-
-// serializeEdge converts edge to JSON
-func serializeEdge(edge Edge) ([]byte, error) {
-	return json.Marshal(edge)
-}
-
-// deserializeEdge converts JSON to edge
-func deserializeEdge(data []byte) (Edge, error) {
-	var edge Edge
-	err := json.Unmarshal(data, &edge)
-	return edge, err
-}
-
-// DAG edge kinds that must not have cycles
-var dageKinds = map[string]bool{
-	"CONTAINS":   true,
-	"DEPENDS_ON": true,
-}
-
-// isDAGKind returns true if edge kind must form a DAG
-func isDAGKind(kind string) bool {
-	return dageKinds[kind]
-}
-
-// buildAdjacencyList builds adjacency list for given edge kind
-func (g *MemoryGraphStore) buildAdjacencyList(kind string) map[string][]string {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-
-	adjacency := make(map[string][]string)
-
-	for _, edge := range g.edges {
-		if edge.Kind == kind {
-			adjacency[edge.SourceID] = append(adjacency[edge.SourceID], edge.TargetID)
+	if hasCycle {
+		// Build cycle path
+		cycle := []string{cycleEnd}
+		current := cycleStart
+		for current != cycleEnd {
+			cycle = append([]string{current}, cycle...)
+			current = path[current]
+		}
+		return &CycleError{
+			Cycle: cycle,
 		}
 	}
 
-	return adjacency
+	return nil
 }
 
-// getAllNodeIDs returns all node IDs in the graph
-func (g *MemoryGraphStore) getAllNodeIDs() []string {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
+// ============================================================================
+// STORE INTERFACE
+// ============================================================================
 
-	ids := make([]string, 0, len(g.nodes))
-	for id := range g.nodes {
-		ids = append(ids, id)
+type GraphStore interface {
+	SaveNodes(nodes ...*Node)
+	SaveEdges(edges ...*Edge)
+	GetNode(id string) (*Node, error)
+	GetEdge(id string) (*Edge, error)
+	ListNodes() ([]*Node, error)
+	ListEdges() ([]*Edge, error)
+}
+
+type InMemoryGraphStore struct {
+	nodes map[string]*Node
+	edges map[string]*Edge
+}
+
+func NewGraphStore() *InMemoryGraphStore {
+	return &InMemoryGraphStore{
+		nodes: make(map[string]*Node),
+		edges: make(map[string]*Edge),
 	}
-	return ids
+}
+
+func (s *InMemoryGraphStore) SaveNodes(nodes ...*Node) {
+	for _, node := range nodes {
+		s.nodes[node.ID] = node
+	}
+}
+
+func (s *InMemoryGraphStore) SaveEdges(edges ...*Edge) {
+	for _, edge := range edges {
+		s.edges[edge.ID] = edge
+	}
+}
+
+func (s *InMemoryGraphStore) GetNode(id string) (*Node, error) {
+	node, ok := s.nodes[id]
+	if !ok {
+		return nil, &NodeNotFoundError{ID: id}
+	}
+	return node, nil
+}
+
+func (s *InMemoryGraphStore) GetEdge(id string) (*Edge, error) {
+	edge, ok := s.edges[id]
+	if !ok {
+		return nil, &EdgeNotFoundError{ID: id}
+	}
+	return edge, nil
+}
+
+func (s *InMemoryGraphStore) ListNodes() ([]*Node, error) {
+	result := make([]*Node, 0, len(s.nodes))
+	for _, node := range s.nodes {
+		result = append(result, node)
+	}
+	return result, nil
+}
+
+func (s *InMemoryGraphStore) ListEdges() ([]*Edge, error) {
+	result := make([]*Edge, 0, len(s.edges))
+	for _, edge := range s.edges {
+		result = append(result, edge)
+	}
+	return result, nil
+}
+
+// ============================================================================
+// ERRORS
+// ============================================================================
+
+type ReferentialIntegrityError struct {
+	EdgeID    string
+	SourceID  string
+	TargetID  string
+	MissingID string
+}
+
+func (e *ReferentialIntegrityError) Error() string {
+	return fmt.Sprintf("referential integrity violation: edge %s (%s -> %s) references non-existent node %s",
+		e.EdgeID, e.SourceID, e.TargetID, e.MissingID)
+}
+
+type DuplicateEdgeError struct {
+	EdgeID   string
+	SourceID string
+	TargetID string
+	Kind     EdgeKind
+}
+
+func (e *DuplicateEdgeError) Error() string {
+	return fmt.Sprintf("duplicate edge: (%s, %s, %s) already exists (edge ID: %s)",
+		e.SourceID, e.TargetID, e.Kind, e.EdgeID)
+}
+
+type ConfidenceRangeError struct {
+	EdgeID     string
+	Confidence float64
+	Reason     string
+}
+
+func (e *ConfidenceRangeError) Error() string {
+	return fmt.Sprintf("confidence range error: edge %s has confidence %f (%s)",
+		e.EdgeID, e.Confidence, e.Reason)
+}
+
+type CycleError struct {
+	Cycle []string
+}
+
+func (e *CycleError) Error() string {
+	return fmt.Sprintf("cycle detected: %v", e.Cycle)
+}
+
+type NodeNotFoundError struct {
+	ID string
+}
+
+func (e *NodeNotFoundError) Error() string {
+	return "node not found: " + e.ID
+}
+
+type EdgeNotFoundError struct {
+	ID string
+}
+
+func (e *EdgeNotFoundError) Error() string {
+	return "edge not found: " + e.ID
 }

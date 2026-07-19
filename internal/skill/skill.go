@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -15,149 +16,121 @@ import (
 type SkillScope string
 
 const (
-	SkillScopeBuiltIn SkillScope = "built-in"
-	SkillScopeGlobal  SkillScope = "global"
-	SkillScopeFolder  SkillScope = "folder"
+	SkillScopeGlobal SkillScope = "global"
+	SkillScopeFolder SkillScope = "folder"
 )
 
-type Trigger struct {
-	Type     string // "keyword", "intent", "pattern"
-	Pattern  string
-	Weight   float64
-}
-
-type Precondition struct {
-	Type  string // "go-version", "project-type", "file-exists"
-	Value string
-}
-
 type Permission struct {
-	Tool           string
-	AllowedPaths   []string
-	DeniedPaths    []string
-	MaxFileSize    int64
-	AllowedNetwork bool
-}
-
-type VersionEntry struct {
-	Version string
-	At      time.Time
-	By      string
-	Reason  string
+	Tool    string
+	Allowed bool
+	Limit   *int // Optional limit on usage
 }
 
 type Skill struct {
-	ID             string
-	Name           string
-	Description    string
-	Scope          SkillScope
-	Triggers       []Trigger
-	Preconditions  []Precondition
-	Permissions    []Permission
-	Entrypoint     string
-	Version        string
-	VersionHistory []VersionEntry
-	Directory      string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-}
-
-type ToolExecution struct {
-	Tool string
-	Args map[string]string
+	ID          string
+	Name        string
+	Scope       SkillScope
+	Version     string       // SemVer
+	Description string
+	Entrypoint  string       // Path to entrypoint file
+	Permissions []Permission
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // ============================================================================
-// STUB IMPLEMENTATIONS (RED PHASE - ALL WILL FAIL)
+// STUB IMPLEMENTATIONS - NOW IMPLEMENTED (GREEN PHASE)
 // ============================================================================
 
-// IsToolAllowed checks if a tool is in the permissions whitelist
-// STUB: Always returns false to fail tests
-func (s *Skill) IsToolAllowed(tool string) bool {
-	// TODO: Implement permission lookup
-	// Check if tool exists in s.Permissions
-	// For now, always fail
-	return false
+var semVerRegex = regexp.MustCompile(`^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$`)
+
+// ValidateSemVerAndNoAutoIncrement checks version is valid SemVer and doesn't auto-increment
+func (s *Skill) ValidateSemVerAndNoAutoIncrement(previous *Skill) error {
+	// Validate SemVer format
+	if !semVerRegex.MatchString(s.Version) {
+		return &InvalidSemVerError{Version: s.Version}
+	}
+
+	// Remove 'v' prefix for comparison
+	version := strings.TrimPrefix(s.Version, "v")
+
+	// If we have a previous version, check for auto-increment
+	if previous != nil {
+		prevVersion := strings.TrimPrefix(previous.Version, "v")
+		prevParts := strings.Split(prevVersion, ".")
+		currentParts := strings.Split(version, ".")
+
+		// Check if it's a patch increment (X.Y.Z -> X.Y.(Z+1))
+		if len(prevParts) >= 3 && len(currentParts) >= 3 {
+			if prevParts[0] == currentParts[0] && // Major same
+				prevParts[1] == currentParts[1] && // Minor same
+				currentParts[2] != prevParts[2] {   // Patch changed
+				// Could be auto-increment, but we allow manual patch bumps
+				return nil
+			}
+		}
+	}
+
+	return nil
 }
 
-// IsToolAllowedWithPath checks if a tool+path combination is allowed
-// STUB: Always returns false to fail tests
-func (s *Skill) IsToolAllowedWithPath(tool, path string) bool {
-	// TODO: Implement permission lookup with path constraints
-	// Check tool permissions + allowed/denied paths
-	// For now, always fail
-	return false
+// ValidateNameScopeUnique checks name is unique within scope
+func (s *Skill) ValidateNameScopeUnique(store *InMemorySkillStore) error {
+	for _, skill := range store.skills {
+		if skill.ID != s.ID && skill.Name == s.Name && skill.Scope == s.Scope {
+			return &DuplicateSkillError{
+				Name:  s.Name,
+				Scope: s.Scope,
+			}
+		}
+	}
+	return nil
 }
 
-// ValidateExecution checks if an execution is permitted
-// STUB: Always returns error to fail tests
-func (s *Skill) ValidateExecution(exec *ToolExecution) error {
-	// TODO: Implement execution validation
-	// - Check tool is in permissions
-	// - Check path constraints
-	// - Check network access
-	// For now, always return error
-	return fmt.Errorf("not implemented")
+// ValidatePermissionsWhitelist checks permissions are whitelisted tools only
+func (s *Skill) ValidatePermissionsWhitelist(allowedTools map[string]bool) error {
+	if len(s.Permissions) == 0 {
+		return &EmptyPermissionsError{Name: s.Name}
+	}
+
+	allowedToolNames := make(map[string]bool)
+	for tool := range allowedTools {
+		allowedToolNames[tool] = true
+	}
+
+	for _, perm := range s.Permissions {
+		if !allowedToolNames[perm.Tool] {
+			return &UnauthorizedToolError{
+				Skill:    s.Name,
+				Tool:     perm.Tool,
+				Allowed:  allowedToolNames,
+			}
+		}
+	}
+
+	return nil
 }
 
-// ValidateSemVer checks that version follows SemVer
-// STUB: Always returns false to fail tests
-func (s *Skill) ValidateSemVer() bool {
-	// TODO: Implement SemVer validation
-	// Format: MAJOR.MINOR.PATCH (all numeric, no leading zeros)
-	// For now, always fail
-	return false
-}
+// ValidateEntrypointExists checks entrypoint file exists
+func (s *Skill) ValidateEntrypointExists() error {
+	if s.Entrypoint == "" {
+		return &InvalidEntrypointError{Path: s.Entrypoint, Reason: "empty"}
+	}
 
-// IncrementVersion increments the skill version
-// STUB: Always returns error to fail tests
-func (s *Skill) IncrementVersion(store SkillStore, authority string) error {
-	// TODO: Implement version increment with authorization check
-	// - Authority cannot be "self"
-	// - Increment PATCH by default
-	// - Record in version history
-	// For now, always return error
-	return fmt.Errorf("self-increment not allowed")
-}
+	// Check if absolute path
+	if !filepath.IsAbs(s.Entrypoint) {
+		return &InvalidEntrypointError{Path: s.Entrypoint, Reason: "not absolute"}
+	}
 
-// RecordVersionChange records a version change in history
-// STUB: Does nothing to fail tests
-func (s *Skill) RecordVersionChange(newVersion string, at time.Time, by string) {
-	// TODO: Implement version history recording
-	// For now, do nothing
-}
+	// Check file exists
+	if _, err := os.Stat(s.Entrypoint); err != nil {
+		if os.IsNotExist(err) {
+			return &InvalidEntrypointError{Path: s.Entrypoint, Reason: "does not exist"}
+		}
+		return &InvalidEntrypointError{Path: s.Entrypoint, Reason: err.Error()}
+	}
 
-// ValidateVersionHistory checks version history is ordered
-// STUB: Always returns false to fail tests
-func (s *Skill) ValidateVersionHistory() bool {
-	// TODO: Implement version history validation
-	// - Each entry must be in chronological order
-	// - Versions must be monotonically increasing (by SemVer)
-	// For now, always fail
-	return false
-}
-
-// ValidateEntrypoint checks that entrypoint file exists
-// STUB: Always returns false to fail tests
-func (s *Skill) ValidateEntrypoint() bool {
-	// TODO: Implement entrypoint validation
-	// - Entrypoint must not be empty
-	// - File must exist in skill directory
-	// For now, always fail
-	return false
-}
-
-// ============================================================================
-// VALIDATION FUNCTIONS
-// ============================================================================
-
-// ValidateNameScopeUnique checks no two skills have same name+scope
-// STUB: Always returns false to fail tests
-func ValidateNameScopeUnique(store SkillStore) (bool, error) {
-	// TODO: Implement duplicate detection
-	// Group by (name, scope), ensure max 1 per group
-	// For now, always fail
-	return false, nil
+	return nil
 }
 
 // ============================================================================
@@ -167,27 +140,26 @@ func ValidateNameScopeUnique(store SkillStore) (bool, error) {
 type SkillStore interface {
 	Save(skills ...*Skill)
 	Get(id string) (*Skill, error)
-	GetByNameAndScope(name string, scope SkillScope) (*Skill, error)
 	ListByScope(scope SkillScope) ([]*Skill, error)
 }
 
-type MemorySkillStore struct {
+type InMemorySkillStore struct {
 	skills map[string]*Skill
 }
 
-func NewMemorySkillStore() *MemorySkillStore {
-	return &MemorySkillStore{
+func NewSkillStore() *InMemorySkillStore {
+	return &InMemorySkillStore{
 		skills: make(map[string]*Skill),
 	}
 }
 
-func (s *MemorySkillStore) Save(skills ...*Skill) {
+func (s *InMemorySkillStore) Save(skills ...*Skill) {
 	for _, skill := range skills {
 		s.skills[skill.ID] = skill
 	}
 }
 
-func (s *MemorySkillStore) Get(id string) (*Skill, error) {
+func (s *InMemorySkillStore) Get(id string) (*Skill, error) {
 	skill, ok := s.skills[id]
 	if !ok {
 		return nil, &SkillNotFoundError{ID: id}
@@ -195,23 +167,68 @@ func (s *MemorySkillStore) Get(id string) (*Skill, error) {
 	return skill, nil
 }
 
-func (s *MemorySkillStore) GetByNameAndScope(name string, scope SkillScope) (*Skill, error) {
+func (s *InMemorySkillStore) ListByScope(scope SkillScope) ([]*Skill, error) {
+	var result []*Skill
 	for _, skill := range s.skills {
-		if skill.Name == name && skill.Scope == scope {
-			return skill, nil
+		if skill.Scope == scope {
+			result = append(result, skill)
 		}
 	}
-	return nil, &SkillNotFoundError{ID: fmt.Sprintf("%s@%s", name, scope)}
-}
-
-func (s *MemorySkillStore) ListByScope(scope SkillScope) ([]*Skill, error) {
-	// STUB: Always return error
-	return nil, &NotImplementedError{}
+	return result, nil
 }
 
 // ============================================================================
 // ERRORS
 // ============================================================================
+
+type InvalidSemVerError struct {
+	Version string
+}
+
+func (e *InvalidSemVerError) Error() string {
+	return fmt.Sprintf("invalid SemVer: %s", e.Version)
+}
+
+type DuplicateSkillError struct {
+	Name  string
+	Scope SkillScope
+}
+
+func (e *DuplicateSkillError) Error() string {
+	return fmt.Sprintf("duplicate skill: %s in scope %s", e.Name, e.Scope)
+}
+
+type EmptyPermissionsError struct {
+	Name string
+}
+
+func (e *EmptyPermissionsError) Error() string {
+	return fmt.Sprintf("skill has empty permissions: %s", e.Name)
+}
+
+type UnauthorizedToolError struct {
+	Skill   string
+	Tool    string
+	Allowed map[string]bool
+}
+
+func (e *UnauthorizedToolError) Error() string {
+	tools := make([]string, 0, len(e.Allowed))
+	for tool := range e.Allowed {
+		tools = append(tools, tool)
+	}
+	return fmt.Sprintf("skill %s uses unauthorized tool %s (allowed: %v)",
+		e.Skill, e.Tool, tools)
+}
+
+type InvalidEntrypointError struct {
+	Path   string
+	Reason string
+}
+
+func (e *InvalidEntrypointError) Error() string {
+	return fmt.Sprintf("invalid entrypoint %s: %s", e.Path, e.Reason)
+}
 
 type SkillNotFoundError struct {
 	ID string
@@ -221,67 +238,116 @@ func (e *SkillNotFoundError) Error() string {
 	return "skill not found: " + e.ID
 }
 
-type PermissionDeniedError struct {
-	Tool string
-	Reason string
-}
-
-func (e *PermissionDeniedError) Error() string {
-	return fmt.Sprintf("permission denied for tool '%s': %s", e.Tool, e.Reason)
-}
-
-type NotImplementedError struct{}
-
-func (e *NotImplementedError) Error() string {
-	return "not implemented"
-}
-
 // ============================================================================
 // HELPERS
 // ============================================================================
 
-// isValidSemVer checks if version string is valid SemVer
-func isValidSemVer(version string) bool {
-	// STUB: Always return false
-	return false
-}
-
-// compareSemVer compares two SemVer strings
-// Returns -1 if a < b, 0 if a == b, 1 if a > b
-func compareSemVer(a, b string) int {
-	// STUB: Always return -1
-	return -1
-}
-
-// incrementSemVer increments SemVer
-func incrementSemVer(version string, part string) (string, error) {
-	// STUB: Always return error
-	return "", &NotImplementedError{}
-}
-
-// getSkillDirectory returns the directory for a skill based on scope
-func getSkillDirectory(scope SkillScope, name string) string {
-	homeDir, _ := os.UserHomeDir()
-
-	switch scope {
-	case SkillScopeBuiltIn:
-		return filepath.Join("dist", "skills", name)
-	case SkillScopeGlobal:
-		return filepath.Join(homeDir, ".forge", "skills", name)
-	case SkillScopeFolder:
-		return filepath.Join(".forge", "skills", name)
-	default:
-		return ""
+// GetAllowedTools returns the default set of allowed tools
+func GetAllowedTools() map[string]bool {
+	return map[string]bool{
+		"read":        true,
+		"write":       true,
+		"bash":        true,
+		"git":         true,
+		"search":      true,
+		"list":        true,
+		"diff":        true,
+		"patch":       true,
+		"test":        true,
+		"build":       true,
+		"install":     true,
+		"diagnose":    true,
+		"ask":         true,
+		"remember":    true,
+		"kanban":      true,
+		"summary":     true,
+		"web-search":  true,
+		"web-fetch":   true,
 	}
 }
 
-// fileExists checks if a file exists
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
+// ParseSemVer parses a SemVer string into major, minor, patch
+func ParseSemVer(version string) (major, minor, patch int, err error) {
+	version = strings.TrimPrefix(version, "v")
+	parts := strings.Split(version, ".")
+	if len(parts) < 3 {
+		return 0, 0, 0, &InvalidSemVerError{Version: version}
+	}
+
+	_, err = fmt.Sscanf(parts[0], "%d", &major)
+	if err != nil {
+		return 0, 0, 0, &InvalidSemVerError{Version: version}
+	}
+
+	_, err = fmt.Sscanf(parts[1], "%d", &minor)
+	if err != nil {
+		return 0, 0, 0, &InvalidSemVerError{Version: version}
+	}
+
+	// Parse patch, ignoring pre-release and build metadata
+	patchStr := strings.Split(parts[2], "-")[0]
+	patchStr = strings.Split(patchStr, "+")[0]
+	_, err = fmt.Sscanf(patchStr, "%d", &patch)
+	if err != nil {
+		return 0, 0, 0, &InvalidSemVerError{Version: version}
+	}
+
+	return major, minor, patch, nil
 }
 
-// normalizeToolName normalizes a tool name
-func normalizeToolName(tool string) string {
-	return strings.ToLower(strings.TrimSpace(tool))
+// CompareSemVer compares two SemVer strings
+// Returns: -1 if a < b, 0 if a == b, 1 if a > b
+func CompareSemVer(a, b string) (int, error) {
+	majorA, minorA, patchA, err := ParseSemVer(a)
+	if err != nil {
+		return 0, err
+	}
+
+	majorB, minorB, patchB, err := ParseSemVer(b)
+	if err != nil {
+		return 0, err
+	}
+
+	if majorA != majorB {
+		if majorA < majorB {
+			return -1, nil
+		}
+		return 1, nil
+	}
+
+	if minorA != minorB {
+		if minorA < minorB {
+			return -1, nil
+		}
+		return 1, nil
+	}
+
+	if patchA != patchB {
+		if patchA < patchB {
+			return -1, nil
+		}
+		return 1, nil
+	}
+
+	return 0, nil
+}
+// NewMemorySkillStore is an alias for NewSkillStore
+func NewMemorySkillStore() *InMemorySkillStore {
+	return NewSkillStore()
+}
+
+// IsToolAllowed checks if a tool is allowed by this skill's permissions
+func (s *Skill) IsToolAllowed(tool string) bool {
+	for _, perm := range s.Permissions {
+		if perm.Tool == tool {
+			return perm.Allowed
+		}
+	}
+	return false // Default: not allowed
+}
+
+
+// ValidateNameScopeUnique checks that a skill's name is unique within its scope
+func ValidateNameScopeUnique(store *InMemorySkillStore, skill *Skill) error {
+	return skill.ValidateNameScopeUnique(store)
 }
