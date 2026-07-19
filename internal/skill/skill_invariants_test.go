@@ -33,7 +33,7 @@ func TestSkill_NameScopeUnique(t *testing.T) {
 		store := NewMemorySkillStore()
 		store.Save(skill1, skill2)
 
-		valid, err := ValidateNameScopeUnique(store)
+		valid, err := ValidateNameScopeUnique(store, skill1)
 		require.NoError(t, err)
 		assert.False(t, valid, "Duplicate name+scope should fail validation")
 	})
@@ -57,7 +57,7 @@ func TestSkill_NameScopeUnique(t *testing.T) {
 		store := NewMemorySkillStore()
 		store.Save(skill1, skill2)
 
-		valid, err := ValidateNameScopeUnique(store)
+		valid, err := ValidateNameScopeUnique(store, skill1)
 		require.NoError(t, err)
 		assert.True(t, valid, "Same name in different scopes should pass")
 	})
@@ -81,7 +81,7 @@ func TestSkill_NameScopeUnique(t *testing.T) {
 		store := NewMemorySkillStore()
 		store.Save(skill1, skill2)
 
-		valid, err := ValidateNameScopeUnique(store)
+		valid, err := ValidateNameScopeUnique(store, skill1)
 		require.NoError(t, err)
 		assert.True(t, valid, "Different names in same scope should pass")
 	})
@@ -96,7 +96,7 @@ func TestSkill_NameScopeUnique(t *testing.T) {
 		store := NewMemorySkillStore()
 		store.Save(skills...)
 
-		valid, err := ValidateNameScopeUnique(store)
+		valid, err := ValidateNameScopeUnique(store, skills[0])
 		require.NoError(t, err)
 		assert.False(t, valid, "Three duplicate names should fail validation")
 	})

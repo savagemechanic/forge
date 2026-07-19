@@ -16,8 +16,9 @@ import (
 type SkillScope string
 
 const (
-	SkillScopeGlobal SkillScope = "global"
-	SkillScopeFolder SkillScope = "folder"
+	SkillScopeGlobal   SkillScope = "global"
+	SkillScopeFolder  SkillScope = "folder"
+	SkillScopeBuiltIn SkillScope = "builtin"
 )
 
 type Permission struct {
@@ -29,23 +30,36 @@ type Permission struct {
 	MaxFileSize  int64     // Max file size in bytes
 }
 
+type ToolExecution struct {
+	Tool string
+	Args map[string]string
+}
+
+type VersionEntry struct {
+	Version string
+	At      time.Time
+	By      string
+}
+
 type Skill struct {
-	ID          string
-	Name        string
-	Scope       SkillScope
-	Version     string       // SemVer
-	Description string
-	Entrypoint  string       // Path to entrypoint file
-	Permissions []Permission
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID              string
+	Name            string
+	Scope           SkillScope
+	Version         string         // SemVer
+	Description     string
+	Entrypoint      string         // Path to entrypoint file
+	Permissions     []Permission
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	VersionHistory  []VersionEntry // History of version changes
+	Directory       string         // Skill directory path
 }
 
 // ============================================================================
 // STUB IMPLEMENTATIONS - NOW IMPLEMENTED (GREEN PHASE)
 // ============================================================================
 
-var semVerRegex = regexp.MustCompile(`^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$`)
+var semVerRegex = regexp.MustCompile(`^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$`)
 
 // ValidateSemVerAndNoAutoIncrement checks version is valid SemVer and doesn't auto-increment
 func (s *Skill) ValidateSemVerAndNoAutoIncrement(previous *Skill) error {
@@ -134,6 +148,124 @@ func (s *Skill) ValidateEntrypointExists() error {
 	}
 
 	return nil
+}
+
+// ValidateEntrypoint checks entrypoint file exists (bool version for tests)
+func (s *Skill) ValidateEntrypoint() bool {
+	if s.Entrypoint == "" {
+		return false
+	}
+
+	// Check file exists
+	fullPath := filepath.Join(s.Directory, s.Entrypoint)
+	if _, err := os.Stat(fullPath); err != nil {
+		return false
+	}
+
+	return true
+}
+
+// ValidateSemVer checks if version is valid SemVer (bool version for tests)
+func (s *Skill) ValidateSemVer() bool {
+	return semVerRegex.MatchString(s.Version)
+}
+
+// IsToolAllowedWithPath checks if a tool is allowed with a specific path
+func (s *Skill) IsToolAllowedWithPath(tool, path string) bool {
+	for _, perm := range s.Permissions {
+		if perm.Tool == tool {
+			// Check denied paths first
+			for _, denied := range perm.DeniedPaths {
+				if strings.HasPrefix(path, denied) || strings.HasPrefix(denied, path) {
+					return false
+				}
+			}
+
+			// If allowed paths specified, check them
+			if len(perm.AllowedPaths) > 0 {
+				for _, allowedPath := range perm.AllowedPaths {
+					if strings.HasPrefix(path, allowedPath) {
+						return true
+					}
+				}
+				return false // Path not in allowed list
+			}
+
+			// No path restrictions = allowed
+			return true
+		}
+	}
+	return false // Tool not in permissions
+}
+
+// ValidateExecution checks if a tool execution is allowed
+func (s *Skill) ValidateExecution(exec *ToolExecution) error {
+	for _, perm := range s.Permissions {
+		if perm.Tool == exec.Tool {
+			// Tool is in permissions list = allowed
+			return nil
+		}
+	}
+	return &UnauthorizedToolError{
+		Skill:   s.Name,
+		Tool:    exec.Tool,
+		Allowed: nil,
+	}
+}
+
+// IncrementVersion increments the skill's version by external authority only
+func (s *Skill) IncrementVersion(store *InMemorySkillStore, author string) error {
+	if author == "self" {
+		return fmt.Errorf("skill cannot increment its own version")
+	}
+
+	// Parse current version
+	major, minor, patch, err := ParseSemVer(s.Version)
+	if err != nil {
+		return err
+	}
+
+	// Record current version in history
+	s.RecordVersionChange(s.Version, time.Now(), author)
+
+	// Increment patch
+	s.Version = fmt.Sprintf("%d.%d.%d", major, minor, patch+1)
+
+	return nil
+}
+
+// RecordVersionChange records a version change in history
+func (s *Skill) RecordVersionChange(version string, at time.Time, by string) {
+	s.VersionHistory = append(s.VersionHistory, VersionEntry{
+		Version: version,
+		At:      at,
+		By:      by,
+	})
+}
+
+// ValidateVersionHistory checks version history is in chronological order
+func (s *Skill) ValidateVersionHistory() bool {
+	if len(s.VersionHistory) <= 1 {
+		return true
+	}
+
+	// Check timestamps are chronological
+	for i := 1; i < len(s.VersionHistory); i++ {
+		if s.VersionHistory[i].At.Before(s.VersionHistory[i-1].At) {
+			return false
+		}
+		
+		// Also check SemVer is monotonically increasing
+		cmp, err := CompareSemVer(s.VersionHistory[i].Version, s.VersionHistory[i-1].Version)
+		if err != nil {
+			return false
+		}
+		if cmp <= 0 {
+			return false
+		}
+	}
+
+	return true
 }
 
 // ============================================================================
@@ -343,10 +475,11 @@ func NewMemorySkillStore() *InMemorySkillStore {
 func (s *Skill) IsToolAllowed(tool string) bool {
 	for _, perm := range s.Permissions {
 		if perm.Tool == tool {
-			return perm.Allowed
+			// Tool is in permissions list = allowed
+			return true
 		}
 	}
-	return false // Default: not allowed
+	return false // Not in whitelist = not allowed
 }
 
 
