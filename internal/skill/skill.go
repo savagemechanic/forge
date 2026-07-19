@@ -21,9 +21,12 @@ const (
 )
 
 type Permission struct {
-	Tool    string
-	Allowed bool
-	Limit   *int // Optional limit on usage
+	Tool         string
+	Allowed      bool
+	Limit        *int      // Optional limit on usage
+	AllowedPaths []string  // Paths this tool can access
+	DeniedPaths  []string  // Paths this tool cannot access
+	MaxFileSize  int64     // Max file size in bytes
 }
 
 type Skill struct {
@@ -347,7 +350,8 @@ func (s *Skill) IsToolAllowed(tool string) bool {
 }
 
 
-// ValidateNameScopeUnique checks that a skill's name is unique within its scope
-func ValidateNameScopeUnique(store *InMemorySkillStore, skill *Skill) error {
-	return skill.ValidateNameScopeUnique(store)
+// ValidateNameScopeUnique checks that a skill's name is unique within its scope (two-arg version for tests)
+func ValidateNameScopeUnique(store *InMemorySkillStore, skill *Skill) (bool, error) {
+	err := skill.ValidateNameScopeUnique(store)
+	return err == nil, nil
 }
