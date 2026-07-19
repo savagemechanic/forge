@@ -325,7 +325,22 @@ Join us. Let's build the future of terminal-based AI.
 
 ---
 
-**[⭐ Star us on GitHub](https://github.com/YOUR_USERNAME/forge)**
+**[⭐ Star us on GitHub](https://github.com/savagemechanic/forge)**
+
+---
+
+## Status
+
+**Phase 1 Progress**: 56% complete (13/23 invariants passing)
+
+- ✅ Folder: 4/4 invariants (100%)
+- ✅ Memory: 4/4 invariants (100%)
+- ✅ Session: 4/4 invariants (100%)
+- ✅ Run: 4/4 invariants (100%)
+- ⏳ Skill: 0/3 invariants (in progress)
+- ⏳ Graph: 0/4 invariants (not started)
+
+**Test Coverage**: 29 passing invariant tests
 
 ---
 
