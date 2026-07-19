@@ -134,7 +134,7 @@ func (m *Model) handleSlashCommand(input string) commandResult {
 		return commandResult{output: "Nerd skill not installed. Run: make install-skills", isError: true}
 
 	case "/version", "/v":
-		return commandResult{output: "Forge 0.2.0 (self-hosting build)"}
+		return commandResult{output: "Forge 0.3.0 (hexagonal · local + MLX providers)"}
 
 	case "/index":
 		idx, err := goengine.Load(m.rt.Project().RootPath)
@@ -217,9 +217,19 @@ KEYBINDINGS:
   Enter          Submit input
   Ctrl+C         Quit
   Ctrl+L         Clear screen
-  Up/Down        Scroll transcript
+  Up/Down        Scroll transcript (or navigate completions)
+  Tab            Select completion (when typing /)
   PgUp/PgDn      Page up/down
-  Tab            Autocomplete (commands)
+
+PROVIDERS:
+  --provider local   Rule-based intent parser (default, no LLM needed)
+  --provider mlx     MLX/OpenAI-compatible local model server
+  --provider echo    Simple echo for testing
+
+  Examples:
+    forge                                    # local mode (offline)
+    forge --provider mlx --model mlx-community/Llama-3.2-3B-Instruct-4bit
+    forge --provider mlx --base-url http://localhost:1234/v1
 `
 }
 

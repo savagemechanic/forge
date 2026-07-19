@@ -45,6 +45,11 @@ type Model struct {
 	showHelp    bool
 	helpOverlay string
 
+	// slash command autocomplete
+	showCompletions bool
+	completions     []Command
+	completionIdx   int
+
 	// Go intelligence index (lazily built)
 	goIndex *goengine.Index
 }
@@ -102,6 +107,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Handle autocomplete navigation first
+		if m.showCompletions {
+			switch msg.Type {
+			case tea.KeyTab, tea.KeyDown:
+				m.completionIdx = (m.completionIdx + 1) % len(m.completions)
+				return m, nil
+			case tea.KeyUp:
+				m.completionIdx--
+				if m.completionIdx < 0 {
+					m.completionIdx = len(m.completions) - 1
+				}
+				return m, nil
+			case tea.KeyEnter, tea.KeyRight:
+				if m.completionIdx < len(m.completions) {
+					selected := m.completions[m.completionIdx]
+					m.input.SetValue(selected.Name + " ")
+					m.input.CursorEnd()
+					m.showCompletions = false
+				}
+				return m, nil
+			case tea.KeyEsc:
+				m.showCompletions = false
+				return m, nil
+			}
+		}
+
 		switch msg.Type {
 		case tea.KeyCtrlC:
 			m.quit = true
@@ -120,6 +151,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.input.Reset()
+			m.showCompletions = false
 
 			// Slash command?
 			if strings.HasPrefix(text, "/") {
@@ -155,6 +187,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		default:
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
+			m.updateCompletions()
 			cmds = append(cmds, cmd)
 		}
 		return m, tea.Batch(cmds...)
@@ -225,6 +258,12 @@ func (m Model) View() string {
 	b.WriteString(m.renderStatusLine())
 	b.WriteString("\n")
 
+	// Completion dropdown (above the input)
+	if m.showCompletions && len(m.completions) > 0 {
+		b.WriteString(m.renderCompletions())
+		b.WriteString("\n")
+	}
+
 	// Composer
 	b.WriteString(m.input.View())
 
@@ -243,6 +282,35 @@ func (m Model) renderHeader() string {
 		parts = append(parts, dimStyle.Render(p.Summary()))
 	}
 	return headerStyle.Render(strings.Join(parts, "  "))
+}
+
+// renderCompletions renders the slash command dropdown.
+func (m Model) renderCompletions() string {
+	var b strings.Builder
+	maxName := 0
+	for _, c := range m.completions {
+		if len(c.Name) > maxName {
+			maxName = len(c.Name)
+		}
+	}
+	for i, c := range m.completions {
+		marker := "  "
+		if i == m.completionIdx {
+			marker = composerStyle.Render("❯ ")
+		}
+		name := c.Name
+		if i == m.completionIdx {
+			name = composerStyle.Render(name)
+		}
+		args := ""
+		if c.Args != "" {
+			args = " " + dimStyle.Render(c.Args)
+		}
+		b.WriteString(marker + name + args)
+		b.WriteString("\n")
+	}
+	b.WriteString(hintStyle.Render("  ↑↓ navigate · Tab/Enter select · Esc dismiss"))
+	return b.String()
 }
 
 func (m Model) renderStatusLine() string {
@@ -338,6 +406,22 @@ func (m *Model) executeTool(name string, args map[string]string) ports.ToolResul
 		return ports.ToolResult{Err: fmt.Errorf("no runtime")}
 	}
 	return m.rt.ExecuteToolDirect(name, args)
+}
+
+// updateCompletions filters commands based on the current input.
+// Shows the dropdown only when typing a slash command prefix (no space yet).
+func (m *Model) updateCompletions() {
+	val := m.input.Value()
+	// Only show completions when typing a command (starts with /, no space yet)
+	if strings.HasPrefix(val, "/") && !strings.Contains(val, " ") {
+		m.completions = filterCommands(val)
+		m.showCompletions = len(m.completions) > 0
+		if m.completionIdx >= len(m.completions) {
+			m.completionIdx = 0
+		}
+	} else {
+		m.showCompletions = false
+	}
 }
 
 // Run starts the Bubble Tea program.
