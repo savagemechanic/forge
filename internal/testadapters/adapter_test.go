@@ -177,8 +177,8 @@ func TestTestFixture(t *testing.T) {
 		defer fixture.Teardown()
 
 		err := fixture.Reset()
-		// This will fail in stub phase, but that's expected
-		assert.Error(t, err, "Stub implementations should fail")
+		// Reset should succeed now that implementations are real
+		assert.NoError(t, err, "Reset should succeed")
 	})
 }
 
@@ -366,9 +366,10 @@ func TestInMemoryBackends(t *testing.T) {
 
 func TestSQLiteBackends(t *testing.T) {
 	t.Run("sqlite session store exists", func(t *testing.T) {
-		store := NewSQLiteSessionStore(t.TempDir())
+		tmpDir := t.TempDir()
+		store := NewSQLiteSessionStore(tmpDir)
 		assert.NotNil(t, store)
-		assert.Equal(t, t.TempDir(), store.dataDir)
+		assert.Equal(t, tmpDir, store.dataDir)
 	})
 
 	t.Run("sqlite run store exists", func(t *testing.T) {
