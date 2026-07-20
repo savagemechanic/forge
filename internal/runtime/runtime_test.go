@@ -46,7 +46,14 @@ func TestRuntime_InjectionOfPorts(t *testing.T) {
 
 	specs := rt.ToolSpecs()
 	assert.NotEmpty(t, specs)
-	assert.Contains(t, []string{"read", "write", "edit", "list", "bash"}, specs[0].Name)
+	// Verify the expected tools are all present (map order is not guaranteed)
+	names := map[string]bool{}
+	for _, s := range specs {
+		names[s.Name] = true
+	}
+	for _, expected := range []string{"read", "write", "edit", "list", "bash", "git_status"} {
+		assert.True(t, names[expected], "tool %s should be registered", expected)
+	}
 }
 
 func TestRuntime_ExecuteToolDirect(t *testing.T) {
