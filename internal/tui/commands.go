@@ -115,12 +115,12 @@ func (m *Model) handleSlashCommand(input string) commandResult {
 
 	case "/session":
 		if m.rt != nil {
-			s := m.rt.Session()
+			id, folderID, state, msgCount := m.rt.SessionSnapshot()
 			var b strings.Builder
-			fmt.Fprintf(&b, "  ID:        %s\n", s.ID)
-			fmt.Fprintf(&b, "  Folder:    %s\n", s.FolderID)
-			fmt.Fprintf(&b, "  State:     %s\n", s.State)
-			fmt.Fprintf(&b, "  Messages:  %d\n", len(s.Messages))
+			fmt.Fprintf(&b, "  ID:        %s\n", id)
+			fmt.Fprintf(&b, "  Folder:    %s\n", folderID)
+			fmt.Fprintf(&b, "  State:     %s\n", state)
+			fmt.Fprintf(&b, "  Messages:  %d\n", msgCount)
 			return commandResult{output: b.String()}
 		}
 		return commandResult{output: "No session."}

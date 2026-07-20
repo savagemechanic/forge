@@ -45,7 +45,7 @@ version: 1.0.0
 Body content here.
 `), 0644))
 
-	loader := NewLoader(tmpDir, ".")
+	loader := NewLoaderWithDirs(filepath.Join(tmpDir, "skills"), t.TempDir(), t.TempDir())
 	require.NoError(t, loader.Load())
 
 	s, ok := loader.Get("test-skill")
@@ -59,7 +59,7 @@ func TestLoader_ActiveInactive(t *testing.T) {
 	require.NoError(t, os.MkdirAll(skillDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: active-one\ndescription: Active.\n---\n# Body"), 0644))
 
-	loader := NewLoader(tmpDir, ".")
+	loader := NewLoaderWithDirs(filepath.Join(tmpDir, "skills"), t.TempDir(), t.TempDir())
 	require.NoError(t, loader.Load())
 
 	assert.Len(t, loader.Active(), 1)
@@ -71,12 +71,15 @@ func TestLoader_ActiveInactive(t *testing.T) {
 
 func TestLoader_Install(t *testing.T) {
 	tmpDir := t.TempDir()
-	loader := NewLoader(tmpDir, tmpDir)
+	loader := NewLoaderWithDirs(t.TempDir(), filepath.Join(tmpDir, "skills"), t.TempDir())
 	require.NoError(t, loader.Load())
 
 	require.NoError(t, loader.Install("my-skill", "global", "---\nname: my-skill\ndescription: Installed.\n---\n# Body", true))
 
-	s, ok := loader.Get("my-skill")
+	// Reload from the install dir
+	loader2 := NewLoaderWithDirs(t.TempDir(), filepath.Join(tmpDir, "skills"), t.TempDir())
+	require.NoError(t, loader2.Load())
+	s, ok := loader2.Get("my-skill")
 	require.True(t, ok)
 	assert.Equal(t, "Installed.", s.Description)
 }

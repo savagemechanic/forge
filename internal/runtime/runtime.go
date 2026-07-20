@@ -7,6 +7,7 @@ package runtime
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cloudspacelab/forge/internal/folder"
@@ -38,6 +39,10 @@ type Runtime struct {
 	sessions ports.SessionRepository
 	memStore *memory.InMemoryMemoryEntryStore
 	skills   *skill.Loader
+
+	// mu protects session.Messages and conv, which are written in the
+	// Submit() goroutine and read from the driving adapter's goroutine.
+	mu sync.RWMutex
 
 	conv []ports.ProviderMessage
 }
@@ -89,7 +94,25 @@ func (rt *Runtime) SetSkills(s *skill.Loader)                 { rt.skills = s }
 // ---- DOMAIN ACCESSORS (read-only views) ----
 
 func (rt *Runtime) Project() *folder.ProjectInfo { return rt.project }
-func (rt *Runtime) Session() *session.Session    { return rt.session }
+
+// Session returns the active session. Callers must not read .Messages
+// concurrently with Submit(); use MessageCount or SessionSnapshot instead.
+func (rt *Runtime) Session() *session.Session { return rt.session }
+
+// MessageCount returns the number of messages, thread-safe.
+func (rt *Runtime) MessageCount() int {
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+	return len(rt.session.Messages)
+}
+
+// SessionSnapshot returns a copy of the session's scalar fields and a
+// snapshot of the message count, safe to inspect from any goroutine.
+func (rt *Runtime) SessionSnapshot() (id, folderID, state string, msgCount int) {
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+	return rt.session.ID, rt.session.FolderID, string(rt.session.State), len(rt.session.Messages)
+}
 
 // SystemPrompt builds the system prompt from domain context.
 func (rt *Runtime) SystemPrompt() string {
@@ -143,6 +166,7 @@ func (rt *Runtime) Submit(userText string) {
 	rt.emit(ports.Event{Type: ports.EventTurnStart, Text: userText, Time: time.Now()})
 
 	now := time.Now()
+	rt.mu.Lock()
 	rt.session.Messages = append(rt.session.Messages, session.Message{
 		ID:        generateID(),
 		Role:      "user",
@@ -150,6 +174,7 @@ func (rt *Runtime) Submit(userText string) {
 		CreatedAt: now,
 	})
 	rt.conv = append(rt.conv, ports.ProviderMessage{Role: "user", Content: userText})
+	rt.mu.Unlock()
 
 	if rt.provider == nil {
 		rt.emit(ports.Event{

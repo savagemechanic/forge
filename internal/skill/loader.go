@@ -31,10 +31,20 @@ type LoadedSkill struct {
 // NewLoader creates a loader scanning the standard locations.
 func NewLoader(forgeRoot, projectRoot string) *Loader {
 	home, _ := os.UserHomeDir()
+	return NewLoaderWithDirs(
+		filepath.Join(forgeRoot, "skills"),
+		filepath.Join(home, ".forge", "skills"),
+		filepath.Join(projectRoot, ".forge", "skills"),
+	)
+}
+
+// NewLoaderWithDirs creates a loader with explicit directory paths.
+// Used for testing to isolate from the real $HOME/.forge.
+func NewLoaderWithDirs(builtinDir, globalDir, folderDir string) *Loader {
 	return &Loader{
-		builtinDir: filepath.Join(forgeRoot, "skills"),
-		globalDir:  filepath.Join(home, ".forge", "skills"),
-		folderDir:  filepath.Join(projectRoot, ".forge", "skills"),
+		builtinDir: builtinDir,
+		globalDir:  globalDir,
+		folderDir:  folderDir,
 	}
 }
 
